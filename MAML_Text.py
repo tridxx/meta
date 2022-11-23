@@ -150,7 +150,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 epoches = 2
-tasks = 36  # C_9^2
+tasks = 30  # C_9^2-6
 lr_meta = 0.0001
 batch = 3
 
@@ -197,3 +197,16 @@ def train(_epoch):
 
 for epoch in range(epoches):
     train(epoch)
+
+# test
+correct_num = 0
+correct_rate=np.zeros(6)
+for i in range(30, 36):
+    predict, _ = model(TaskDataMatrix[i].input)
+    predict = predict.data.max(1, keepdim=True)[1]
+    correct_num = 0
+    for j in range(len(TaskDataMatrix[i].labels)):
+        if predict[j][0] == TaskDataMatrix[i].labels[j]:
+            correct_num = correct_num + 1
+    correct_rate[i]=correct_num/len(TaskDataMatrix[i].input)
+print(correct_rate)
