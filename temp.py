@@ -107,6 +107,8 @@ n_hidden = 7
 num_classes = 2
 vocab_size = max(x.vocab_size,y1.vocab_size,y2.vocab_size)
 
+device = torch.device("cuda")  # 定义训练的设备
+print(device)
 
 class BiLSTM_Attention(nn.Module):
     def __init__(self):
@@ -168,7 +170,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 input_batch = Variable(torch.LongTensor(x.input1))
 target_batch = Variable(torch.LongTensor(x.label1))
-for epoch in range(3000):
+for epoch in range(10):
     optimizer.zero_grad()
     output, _ = model(input_batch)
     loss = criterion(output, target_batch)

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
+# noinspection PyPep8Naming
 import torch.nn.functional as F
 import json
 import jieba
@@ -16,10 +17,10 @@ def load__data(filename):
     _D = []
     for _i in range(9):
         _D.append([])
-    num = 0
+    _num = 0
     with open(filename, encoding='utf-8') as f:
         for l in f:
-            num += 1
+            _num += 1
             l = json.loads(l)
             classify_name = l['event_list'][0]['class']
 
@@ -64,25 +65,56 @@ class TaskData:
         self.cls1 = cls1
         self.cls2 = cls2
         _text = txt1 + txt2
+        max_sen_len = 0
         self.labels = np.ones(len(txt1) + len(txt2))
         for _i in range(len(txt1)):
             self.labels[_i] = 0  # 将txt的标签记为0
         word_list = []
         for _i in range(len(_text)):
             word_list = word_list + _text[_i]
+            max_sen_len = max(max_sen_len, len(_text[_i]))
         word_list = list(set(word_list))
-        self.word_dict = {w: i for i, w in enumerate(word_list)}
+        max_sen_len = 500  # 改了一下
+        self.word_dict = {w: ii for ii, w in enumerate(word_list)}
         self.vocab_size = len(self.word_dict)
-        self.input = []
+        self.input = np.zeros((len(_text), max_sen_len), dtype=int)
         for sen in range(len(_text)):
-            self.input.append(np.asarray([self.word_dict[n] for n in _text[sen]]))
+            tmp = np.array([self.word_dict[n] for n in _text[sen]])
+            for _i in range(len(_text[sen])):
+                self.input[sen][_i] = tmp[_i]
+        # 下面划分出训练集和测试集
+        testset_len1 = int(len(txt1) / 4)
+        testset_len2 = int(len(txt2) / 4)
+        self.input1 = np.zeros((len(_text) - testset_len1 - testset_len2, max_sen_len), dtype=int)
+        self.label1 = np.zeros(len(_text) - testset_len2 - testset_len1, dtype=int)
+        for _i in range(len(txt1) - testset_len1):
+            self.input1[_i] = self.input[_i]
+            self.label1[_i] = 0
+        for _i in range(len(txt1), len(_text) - testset_len2):
+            self.input1[_i - testset_len1] = self.input[_i]
+            self.label1[_i - testset_len1] = 1
+        self.testset = np.zeros((testset_len2 + testset_len1, max_sen_len), dtype=int)
+        self.testlabel = np.zeros(testset_len1 + testset_len2, dtype=int)
+        for _i in range(testset_len1):
+            self.testset[_i] = self.input[len(txt1) - 1 - _i]
+            self.testlabel[_i] = 0
+        for _i in range(testset_len2):
+            self.testset[_i] = self.input[len(_text) - 1 - _i]
+            self.testlabel[_i + testset_len1] = 1
 
 
-TaskDataMatrix = list(36, dtype=TaskData)
+TaskDataMatrix = []
 num = 0
 for i in range(9):
-    for j in range(9):
-        TaskDataMatrix[num] = TaskData(t[i], i, t[j], j)
+    for j in range(i + 1, 9):
+        TaskDataMatrix.append(TaskData(t[i], i, t[j], j))
+
+dtype = torch.FloatTensor
+embedding_dim = 3
+n_hidden = 7
+num_classes = 2
+vocab_size = max(TaskDataMatrix[i].vocab_size for i in range(36))
+print()
 
 
 # 超参数和数据集的接口都要补上去
@@ -94,7 +126,8 @@ class BiLSTM_Attention(nn.Module):
         self.lstm = nn.LSTM(embedding_dim, n_hidden, bidirectional=True)
         self.out = nn.Linear(n_hidden * 2, num_classes)
 
-    def attention_net(self, lstm_output, final_state):
+    @staticmethod
+    def attention_net(lstm_output, final_state):
         hidden = final_state.view(-1, n_hidden * 2, 1)
         attn_weights = torch.bmm(lstm_output, hidden).squeeze(2)
         soft_attn_weights = F.softmax(attn_weights, 1)
@@ -116,8 +149,8 @@ model = BiLSTM_Attention()
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-epoches = 20
-tasks = 35  # C_9^2 -1
+epoches = 2
+tasks = 36  # C_9^2
 lr_meta = 0.0001
 batch = 3
 
@@ -129,37 +162,37 @@ meta_grd = torch.zeros_like(meta_phi)
 
 
 # training
-def train(epoch):
+def train(_epoch):
     global meta_grd, meta_phi
-    optimizer.zero_grad()
-    output, attention = model(input_batch)
-    loss = criterion(output, target_batch)
-    if (epoch + 1) % 1000 == 0:
-        print('Epoch:', '%04d' % (epoch + 1), 'cost =', '{:.6f}'.format(loss))
-    loss.backward()
-    optimizer.step()
+    # optimizer.zero_grad()
+    # output, attention = model(input_batch)
+    # loss = criterion(output, target_batch)
+    # if (_epoch + 1) % 1000 == 0:
+    #     print('Epoch:', '%04d' % (_epoch + 1), 'cost =', '{:.6f}'.format(loss))
+    # loss.backward()
+    # optimizer.step()
 
     loss_sum = 0.0
-    for i in range(tasks):
+    for _i in range(tasks):
         model.W.data = meta_phi.data
         optimizer.zero_grad()
-        output, attention = model(input_batch)
-        loss = criterion(output, target_batch)
+        output, attention = model(TaskDataMatrix[_i].input1)
+        loss = criterion(output, TaskDataMatrix[_i].label1)
         loss_sum = loss_sum + loss.data.item()
         loss.backward()
         optimizer.step()
         theta_matrix[1, :] = model.W
-    for i in range(tasks):
-        model.W.data = theta_matrix[i]
+    for _i in range(tasks):
+        model.W.data = theta_matrix[_i]
         optimizer.zero_grad()
-        output, attention = model(query_batch)
-        loss = criterion(output, query_batch_label)
+        output, attention = model(TaskDataMatrix[_i].testset)
+        loss = criterion(output, TaskDataMatrix[_i].testlabel)
         loss.backward()
         optimizer.step()
         meta_grd = meta_grd + model.W
     meta_phi = meta_phi - lr_meta * meta_grd / tasks
-    if epoch + 1 % 200 == 0:
-        print("the Epoch is {:04d}".format(epoch), "the Loss is {:.4f}".format(loss_sum / tasks))
+    if _epoch + 1 % 200 == 0:
+        print("the Epoch is {:04d}".format(_epoch), "the Loss is {:.4f}".format(loss_sum / tasks))
 
 
 for epoch in range(epoches):
