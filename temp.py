@@ -98,12 +98,14 @@ f1 = 'C:\\Users\\86150\\Desktop\\data\\train.json'
 text = load__data(f1)
 cls = ['财经/交易', '产品行为', '交往', '竞赛行为', '人生', '司法行为', '灾害/意外', '组织行为', '组织关系']
 x = TaskData(text[0], cls[0], text[1], cls[1])
+y1 = TaskData(text[2], cls[2], text[3], cls[3])
+y2 = TaskData(text[4], cls[4], text[5], cls[5])
 
 dtype = torch.FloatTensor
 embedding_dim = 3
-n_hidden = 8
+n_hidden = 7
 num_classes = 2
-vocab_size = x.vocab_size
+vocab_size = max(x.vocab_size,y1.vocab_size,y2.vocab_size)
 
 
 class BiLSTM_Attention(nn.Module):
@@ -166,7 +168,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 input_batch = Variable(torch.LongTensor(x.input1))
 target_batch = Variable(torch.LongTensor(x.label1))
-for epoch in range(100):
+for epoch in range(3000):
     optimizer.zero_grad()
     output, _ = model(input_batch)
     loss = criterion(output, target_batch)
@@ -185,8 +187,6 @@ for i in range(len(x.testlabel)):
         correct_num = correct_num + 1
 print("test in same domain: ", correct_num / len(x.testlabel))
 
-y1 = TaskData(text[2], cls[2], text[3], cls[3])
-y2 = TaskData(text[4], cls[4], text[5], cls[5])
 
 test_batch = Variable(torch.LongTensor(y1.testset))
 predict, _ = model(test_batch)
@@ -196,7 +196,6 @@ for i in range(len(y1.testlabel)):
     if predict[i][0] == y1.testlabel[i]:
         correct_num = correct_num + 1
 print("test in y1 domain: ", correct_num / len(y1.testlabel))
-
 
 test_batch = Variable(torch.LongTensor(y2.testset))
 predict, _ = model(test_batch)
