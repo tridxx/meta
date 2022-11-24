@@ -72,6 +72,12 @@ class TaskData:
         for _i in range(testset_len2):
             self.testset[_i] = self.input[len(_text) - 1 - _i]
             self.testlabel[_i + testset_len1] = 1
+        torch.tensor(self.input)
+        torch.tensor(self.input1)
+        torch.tensor(self.labels)
+        torch.tensor(self.label1)
+        torch.tensor(self.testset)
+        torch.tensor(self.testlabel)
 
 
 class BiLSTM_Attention(nn.Module):
@@ -100,7 +106,8 @@ class BiLSTM_Attention(nn.Module):
         return self.out(attn_output), attention
 
     def functional_forward(self, x, _params):
-        x = F.embedding(x, weight=_params[f'embedding.weight'])
+        x=torch.tensor(x)
+        x = F.embedding(x, weight=_params.get(f'embedding.weight'))
         x = x.permute(1, 0, 2)
         hidden_state = Variable(torch.zeros(1 * 2, len(x), n_hidden))
         cell_state = Variable(torch.zeros(1 * 2, len(x), n_hidden))
@@ -111,7 +118,7 @@ class BiLSTM_Attention(nn.Module):
         x, (final_hidden_state, final_cell_state) = lstm(x, (hidden_state, cell_state))
         x = x.permute(1, 0, 2)
         attn_output, attention = self.attention_net(x, final_hidden_state)
-        x = F.linear(n_hidden * 2, num_classes, bias=_params[f'out.bias'])
+        x = F.linear(n_hidden * 2, num_classes,weight=_params.get(f'out.weight'), bias=_params[f'out.bias'])
         return x, attention
 
 
@@ -119,25 +126,23 @@ def maml_train(_model, innerlr, supportset, supportlabels, queryset, querylabels
                is_train=True):
     meta_loss = []
     meta_acc = []
-    for supportset, supportlabels, queryset, querylabels in zip(supportset, supportlabels, queryset,
-                                                                querylabels):
 
-        fast_weights = collections.OrderedDict(model.named_parameters())
-        for _ in range(_inner_step):
-            support_logit = model.functional_forward(supportset, fast_weights)
-            support_loss = nn.CrossEntropyLoss().cuda()(support_logit, supportlabels)
-            grads = torch.autograd.grad(support_loss, fast_weights.values(), create_graph=True)
-            fast_weights = collections.OrderedDict((name, param - innerlr * grads)
-                                                   for ((name, param), grads) in zip(fast_weights.items(), grads))
+    fast_weights = collections.OrderedDict(model.named_parameters())
+    for _ in range(_inner_step):
+        support_logit = model.functional_forward(supportset, fast_weights)
+        support_loss = nn.CrossEntropyLoss().cuda()(support_logit, supportlabels)
+        grads = torch.autograd.grad(support_loss, fast_weights.values(), create_graph=True)
+        fast_weights = collections.OrderedDict((name, param - innerlr * grads)
+                                               for ((name, param), grads) in zip(fast_weights.items(), grads))
 
-        query_logit = model.functional_forward(queryset, fast_weights)
-        query_prediction = torch.max(query_logit, dim=1)[1]
+    query_logit = model.functional_forward(queryset, fast_weights)
+    query_prediction = torch.max(query_logit, dim=1)[1]
 
-        query_loss = nn.CrossEntropyLoss().cuda()(query_logit, querylabels)
-        query_acc = torch.eq(querylabels, query_prediction).sum() / len(querylabels)
+    query_loss = nn.CrossEntropyLoss().cuda()(query_logit, querylabels)
+    query_acc = torch.eq(querylabels, query_prediction).sum() / len(querylabels)
 
-        meta_loss.append(query_loss)
-        meta_acc.append(query_acc.data.cpu().numpy())
+    meta_loss.append(query_loss)
+    meta_acc.append(query_acc.data.cpu().numpy())
 
     _optimizer.zero_grad()
     meta_loss = torch.stack(meta_loss).mean()
@@ -176,7 +181,7 @@ if __name__ == '__main__':
 
     model.train()
 
-    epochs = 10
+    epochs = 2
 
     tasks = 30
 
