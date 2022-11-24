@@ -7,6 +7,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import json
 import jieba
+import collections
 import random as rd
 
 
@@ -146,70 +147,127 @@ class BiLSTM_Attention(nn.Module):
         return self.out(attn_output), attention
 
 
-model = BiLSTM_Attention()
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-epoches = 2
-tasks = 30  # C_9^2-6
-lr_meta = 0.0001
-batch = 3
+# model = BiLSTM_Attention()
+# criterion = nn.CrossEntropyLoss()
+# optimizer = optim.Adam(model.parameters(), lr=0.001)
+# epoches = 2
+# tasks = 30  # C_9^2-6
+# lr_meta = 0.0001
+# batch = 3
 
-theta_matrix = torch.zeros(size=[tasks, 1])
-theta_matrix = theta_matrix.float()
+
+# theta_matrix = torch.zeros(size=[tasks, 1])
+# theta_matrix = theta_matrix.float()
 # params = [p for p in model.parameters() if p.requires_grad]
 # meta_phi = torch.randn(size=[1, 1])
 # meta_phi = meta_phi.float()
+#
+#
+# meta_grd = torch.zeros_like(meta_phi)
+def maml_train(model, support_images, support_labels, query_images, query_labels, inner_step, args, optimizer, is_train=True):
+    """
+    Train the model using MAML method.
+    Args:
+        model: Any model
+        support_images: several task support images
+        support_labels: several  support labels
+        query_images: several query images
+        query_labels: several query labels
+        inner_step: support data training step
+        args: ArgumentParser
+        optimizer: optimizer
+        is_train: whether train
+    Returns: meta loss, meta accuracy
+    """
+    meta_loss = []
+    meta_acc = []
 
+    for support_image, support_label, query_image, query_label in zip(support_images, support_labels, query_images, query_labels):
 
-meta_grd = torch.zeros_like(meta_phi)
+        fast_weights = collections.OrderedDict(model.named_parameters())
+        for _ in range(inner_step):
+            # Update weight
+            support_logit = model.functional_forward(support_image, fast_weights)
+            support_loss = nn.CrossEntropyLoss().cuda()(support_logit, support_label)
+            grads = torch.autograd.grad(support_loss, fast_weights.values(), create_graph=True)
+            fast_weights = collections.OrderedDict((name, param - args.inner_lr * grads)
+                                                   for ((name, param), grads) in zip(fast_weights.items(), grads))
+
+        # Use trained weight to get query loss
+        query_logit = model.functional_forward(query_image, fast_weights)
+        query_prediction = torch.max(query_logit, dim=1)[1]
+
+        query_loss = nn.CrossEntropyLoss().cuda()(query_logit, query_label)
+        query_acc = torch.eq(query_label, query_prediction).sum() / len(query_label)
+
+        meta_loss.append(query_loss)
+        meta_acc.append(query_acc.data.cpu().numpy())
+
+    # Zero the gradient
+    optimizer.zero_grad()
+    meta_loss = torch.stack(meta_loss).mean()
+    meta_acc = np.mean(meta_acc)
+
+    if is_train:
+        meta_loss.backward()
+        optimizer.step()
+
+    return meta_loss, meta_acc
 
 
 # training
-def train(_epoch):
-    global meta_grd, meta_phi
-    # optimizer.zero_grad()
-    # output, attention = model(input_batch)
-    # loss = criterion(output, target_batch)
-    # if (_epoch + 1) % 1000 == 0:
-    #     print('Epoch:', '%04d' % (_epoch + 1), 'cost =', '{:.6f}'.format(loss))
-    # loss.backward()
-    # optimizer.step()
+model = BiLSTM_Attention()
+outer_lr = 0.001
+epochs = 5
+# train_dataset, val_dataset = get_dataset(args)
+#
+# train_loader = DataLoader(train_dataset, batch_size=args.task_num, shuffle=True, num_workers=args.num_workers)
+# val_loader = DataLoader(val_dataset, batch_size=args.val_task_num, shuffle=False, num_workers=args.num_workers)
 
-    loss_sum = 0.0
-    for _i in range(tasks):
-        model.W.data = meta_phi.data
-        optimizer.zero_grad()
-        output, attention = model(TaskDataMatrix[_i].input1)
-        loss = criterion(output, TaskDataMatrix[_i].label1)
-        loss_sum = loss_sum + loss.data.item()
-        loss.backward()
-        optimizer.step()
-        theta_matrix[1, :] = model.W
-    for _i in range(tasks):
-        model.W.data = theta_matrix[_i]
-        optimizer.zero_grad()
-        output, attention = model(TaskDataMatrix[_i].testset)
-        loss = criterion(output, TaskDataMatrix[_i].testlabel)
-        loss.backward()
-        optimizer.step()
-        meta_grd = meta_grd + model.W
-    meta_phi = meta_phi - lr_meta * meta_grd / tasks
-    if _epoch + 1 % 200 == 0:
-        print("the Epoch is {:04d}".format(_epoch), "the Loss is {:.4f}".format(loss_sum / tasks))
+params = [p for p in model.parameters() if p.requires_grad]
+optimizer = optim.Adam(params, outer_lr)
+best_acc = 0
 
+model.train()
+for epoch in range(epochs):
+    train_acc = []
+    val_acc = []
+    train_loss = []
+    val_loss = []
 
-for epoch in range(epoches):
-    train(epoch)
+    for support_images, support_labels, query_images, query_labels in train_bar:
+        # train_bar.set_description("epoch {}".format(epoch + 1))
+        # Get variables
+        # support_images = support_images.float().to(dev)
+        # support_labels = support_labels.long().to(dev)
+        # query_images = query_images.float().to(dev)
+        # query_labels = query_labels.long().to(dev)
 
-# test
-# correct_num = 0
-# correct_rate = np.zeros(6)
-# for i in range(30, 36):
-#     predict, _ = model(TaskDataMatrix[i].input)
-#     predict = predict.data.max(1, keepdim=True)[1]
-#     correct_num = 0
-#     for j in range(len(TaskDataMatrix[i].labels)):
-#         if predict[j][0] == TaskDataMatrix[i].labels[j]:
-#             correct_num = correct_num + 1
-#     correct_rate[i] = correct_num / len(TaskDataMatrix[i].input)
-# print(correct_rate)
+        loss, acc = maml_train(model, support_images, support_labels, query_images, query_labels,
+                               1, args, optimizer)
+
+        train_loss.append(loss.item())
+        train_acc.append(acc)
+        train_bar.set_postfix(loss="{:.4f}".format(loss.item()))
+
+    for support_images, support_labels, query_images, query_labels in val_loader:
+        # Get variables
+        support_images = support_images.float().to(dev)
+        support_labels = support_labels.long().to(dev)
+        query_images = query_images.float().to(dev)
+        query_labels = query_labels.long().to(dev)
+
+        loss, acc = maml_train(model, support_images, support_labels, query_images, query_labels,
+                               3, args, optimizer, is_train=False)
+
+        # Must use .item()  to add total loss, or will occur GPU memory leak.
+        # Because dynamic graph is created during forward, collect in backward.
+        val_loss.append(loss.item())
+        val_acc.append(acc)
+
+    print("=> loss: {:.4f}   acc: {:.4f}   val_loss: {:.4f}   val_acc: {:.4f}".
+          format(np.mean(train_loss), np.mean(train_acc), np.mean(val_loss), np.mean(val_acc)))
+
+    if np.mean(val_acc) > best_acc:
+        best_acc = np.mean(val_acc)
+        torch.save(model, 'best.pt')

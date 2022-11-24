@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
 import torch.nn.functional as F
+import collections
+from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 dtype = torch.FloatTensor
@@ -58,8 +60,11 @@ model = BiLSTM_Attention()
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
+
+fast_weight=collections.OrderedDict(model.named_parameters())
+
 # Training
-for epoch in range(5000):
+for epoch in range(1):
     optimizer.zero_grad()
     output, attention = model(input_batch)
     loss = criterion(output, target_batch)
@@ -79,3 +84,5 @@ if predict[0][0] == 0:
     print(test_text, "is Bad Mean...")
 else:
     print(test_text, "is Good Mean!!")
+
+

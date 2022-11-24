@@ -164,13 +164,16 @@ class RNN_ATTs(nn.Module):
         return out
 
 
+
+
+
 # model = RNN_ATTs(vocab_size, embedding_dim, n_hidden, 2)
 model = BiLSTM_Attention()
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 input_batch = Variable(torch.LongTensor(x.input1))
 target_batch = Variable(torch.LongTensor(x.label1))
-for epoch in range(10):
+for epoch in range(1):
     optimizer.zero_grad()
     output, _ = model(input_batch)
     loss = criterion(output, target_batch)
